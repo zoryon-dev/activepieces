@@ -1,36 +1,46 @@
-# ============================================
-# DOCKER COMPOSE OVERRIDE - ACTIVEPIECES
-# Cole este arquivo como docker-compose.override.yml no Dokploy
-# Remove PostgreSQL local e otimiza para Neon + R2
-# ============================================
-
 version: '3.8'
 
 services:
-  # === ACTIVEPIECES - APLICAÇÃO PRINCIPAL ===
   activepieces:
-    # Usa a imagem oficial mais recente
     image: activepieces/activepieces:latest
     container_name: activepieces
     restart: unless-stopped
-    
-    # Expõe apenas porta 80 internamente (Dokploy gerencia SSL)
     ports:
       - "80"
-    
-    # Conecta apenas no Redis (Neon é externo)
     depends_on:
       - redis
-    
-    # Volume para dados locais (se necessário)
     volumes:
       - activepieces_data:/root/.activepieces
-    
-    # Rede interna
     networks:
       - activepieces
-    
-    # Healthcheck para monitoramento
+      - dokploy-network
+    environment:
+      - AP_FRONTEND_URL=${AP_FRONTEND_URL}
+      - AP_ENVIRONMENT=${AP_ENVIRONMENT:-prod}
+      - AP_DB_TYPE=${AP_DB_TYPE}
+      - AP_POSTGRES_HOST=${AP_POSTGRES_HOST}
+      - AP_POSTGRES_PORT=${AP_POSTGRES_PORT}
+      - AP_POSTGRES_DATABASE=${AP_POSTGRES_DATABASE}
+      - AP_POSTGRES_USERNAME=${AP_POSTGRES_USERNAME}
+      - AP_POSTGRES_PASSWORD=${AP_POSTGRES_PASSWORD}
+      - AP_POSTGRES_USE_SSL=${AP_POSTGRES_USE_SSL}
+      - AP_QUEUE_MODE=${AP_QUEUE_MODE}
+      - AP_REDIS_HOST=${AP_REDIS_HOST}
+      - AP_REDIS_PORT=${AP_REDIS_PORT}
+      - AP_REDIS_PASSWORD=${AP_REDIS_PASSWORD}
+      - AP_SECRET=${AP_SECRET}
+      - AP_ENCRYPTION_KEY=${AP_ENCRYPTION_KEY}
+      - AP_FILE_STORAGE_LOCATION=${AP_FILE_STORAGE_LOCATION}
+      - AP_S3_ENDPOINT=${AP_S3_ENDPOINT}
+      - AP_S3_BUCKET=${AP_S3_BUCKET}
+      - AP_S3_ACCESS_KEY_ID=${AP_S3_ACCESS_KEY_ID}
+      - AP_S3_SECRET_ACCESS_KEY=${AP_S3_SECRET_ACCESS_KEY}
+      - AP_S3_REGION=${AP_S3_REGION}
+      - AP_FLOW_WORKER_CONCURRENCY=${AP_FLOW_WORKER_CONCURRENCY:-10}
+      - AP_SCHEDULED_WORKER_CONCURRENCY=${AP_SCHEDULED_WORKER_CONCURRENCY:-5}
+      - AP_EXECUTION_MODE=${AP_EXECUTION_MODE:-SANDBOXED}
+      - AP_SIGN_UP_ENABLED=${AP_SIGN_UP_ENABLED:-true}
+      - AP_TELEMETRY_ENABLED=${AP_TELEMETRY_ENABLED:-false}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/api/v1/health"]
       interval: 30s
@@ -38,57 +48,29 @@ services:
       retries: 3
       start_period: 40s
 
-  # === REDIS - SISTEMA DE FILAS LOCAL ===
   redis:
-    # Imagem Redis Alpine (menor e mais segura)
     image: redis:7-alpine
     container_name: activepieces_redis
     restart: unless-stopped
-    
-    # Comando com password obrigatório
     command: redis-server --requirepass ${AP_REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
-    
-    # Sem exposição de portas (apenas interno)
-    ports: []
-    
-    # Volume para persistência do Redis
     volumes:
       - redis_data:/data
-    
-    # Rede interna
     networks:
       - activepieces
-    
-    # Healthcheck do Redis
     healthcheck:
       test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # === REMOVE POSTGRESQL LOCAL ===
-  # Como usamos Neon Database externo, desabilitamos PostgreSQL local
-  postgres:
-    deploy:
-      replicas: 0  # Desabilita completamente o PostgreSQL local
-
-# === VOLUMES PERSISTENTES ===
 volumes:
-  # Volume para dados do Activepieces (configs, cache, etc)
   activepieces_data:
     driver: local
-  
-  # Volume para dados do Redis (filas, cache)
   redis_data:
     driver: local
-  
-  # Remove volume do PostgreSQL (não usado)
-  postgres_data: null
 
-# === REDE INTERNA ===
 networks:
   activepieces:
     driver: bridge
-    # Configurações de rede otimizadas
-    driver_opts:
-      com.docker.network.bridge.name: activepieces0
+  dokploy-network:
+    external: true
