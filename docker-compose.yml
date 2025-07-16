@@ -1,44 +1,94 @@
-version: '3.0'
+# ============================================
+# DOCKER COMPOSE OVERRIDE - ACTIVEPIECES
+# Cole este arquivo como docker-compose.override.yml no Dokploy
+# Remove PostgreSQL local e otimiza para Neon + R2
+# ============================================
+
+version: '3.8'
+
 services:
+  # === ACTIVEPIECES - APLICAÇÃO PRINCIPAL ===
   activepieces:
-    image: ghcr.io/activepieces/activepieces:0.66.0
+    # Usa a imagem oficial mais recente
+    image: activepieces/activepieces:latest
     container_name: activepieces
     restart: unless-stopped
-    ## Enable the following line if you already use AP_EXECUTION_MODE with SANDBOXED or old activepieces, checking the breaking change documentation for more info.
-    ## privileged: true
+    
+    # Expõe apenas porta 80 internamente (Dokploy gerencia SSL)
     ports:
-      - '8080:80'
+      - "80"
+    
+    # Conecta apenas no Redis (Neon é externo)
     depends_on:
-      - postgres
       - redis
-    env_file: .env
+    
+    # Volume para dados locais (se necessário)
     volumes:
-      - ./cache:/usr/src/app/cache
+      - activepieces_data:/root/.activepieces
+    
+    # Rede interna
     networks:
       - activepieces
-  postgres:
-    image: 'postgres:14.4'
-    container_name: postgres
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      - 'POSTGRES_DB=${AP_POSTGRES_DATABASE}'
-      - 'POSTGRES_PASSWORD=${AP_POSTGRES_PASSWORD}'
-      - 'POSTGRES_USER=${AP_POSTGRES_USERNAME}'
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - activepieces
+    
+    # Healthcheck para monitoramento
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # === REDIS - SISTEMA DE FILAS LOCAL ===
   redis:
-    image: 'redis:7.0.7'
-    container_name: redis
+    # Imagem Redis Alpine (menor e mais segura)
+    image: redis:7-alpine
+    container_name: activepieces_redis
     restart: unless-stopped
+    
+    # Comando com password obrigatório
+    command: redis-server --requirepass ${AP_REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    
+    # Sem exposição de portas (apenas interno)
+    ports: []
+    
+    # Volume para persistência do Redis
     volumes:
-      - 'redis_data:/data'
+      - redis_data:/data
+    
+    # Rede interna
     networks:
       - activepieces
+    
+    # Healthcheck do Redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # === REMOVE POSTGRESQL LOCAL ===
+  # Como usamos Neon Database externo, desabilitamos PostgreSQL local
+  postgres:
+    deploy:
+      replicas: 0  # Desabilita completamente o PostgreSQL local
+
+# === VOLUMES PERSISTENTES ===
 volumes:
-  postgres_data:
+  # Volume para dados do Activepieces (configs, cache, etc)
+  activepieces_data:
+    driver: local
+  
+  # Volume para dados do Redis (filas, cache)
   redis_data:
+    driver: local
+  
+  # Remove volume do PostgreSQL (não usado)
+  postgres_data: null
+
+# === REDE INTERNA ===
 networks:
   activepieces:
+    driver: bridge
+    # Configurações de rede otimizadas
+    driver_opts:
+      com.docker.network.bridge.name: activepieces0
